@@ -30,8 +30,10 @@ int main(int argc, char* argv[])
 
     int datalink = pcap_datalink(input_handle);
 
-    if (datalink != DLT_RAW) {
-        fprintf(stderr, "The link-layer header type is not DLT_RAW.");
+    if (datalink != DLT_RAW &&
+        datalink != DLT_IPV4 &&
+        datalink != DLT_IPV6) {
+        fprintf(stderr, "The link-layer header type is not DLT_RAW/DLT_IPV4/DLT_IPV6.");
         pcap_close(input_handle);
         return 1;
     }
@@ -72,6 +74,8 @@ int main(int argc, char* argv[])
         uint16_t eth_type = 0;
 
         /* IP version */
+	/* With DLT_IPV4 we should have only ipv4 (and only ipv6 with DLT_IPV6)
+	 * but it should be harmless to check anyway */
         switch (packet_data[0] >> 4) {
         case 4:
             eth_type = htons(0x0800);
