@@ -3,11 +3,21 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #define ETHERNET_HEADER_SIZE 14
 
-const uint8_t dest_mac[6] = { 0x02, 0x00, 0x00, 0x00, 0x00, 0x01 };
-const uint8_t src_mac[6] = { 0x02, 0x00, 0x00, 0x00, 0x00, 0x02 };
+void gen_rand_mac_pair(uint8_t dst_mac[6], uint8_t src_mac[6])
+{
+    /* First byte: 0x02 = Locally administered, unicast */
+    dst_mac[0] = 0x02;
+    src_mac[0] = 0x02;
+
+    for (int i = 1; i < 6; i++) {
+        dst_mac[i] = rand() & 0xFF;
+        src_mac[i] = rand() & 0xFF;
+    }
+}
 
 int main(int argc, char* argv[])
 {
@@ -15,6 +25,8 @@ int main(int argc, char* argv[])
         fprintf(stderr, "Usage: %s <input.pcap> <output.pcap>\n", argv[0]);
         return 1;
     }
+
+    srand(time(NULL));
 
     const char* input_filename = argv[1];
     const char* output_filename = argv[2];
@@ -30,9 +42,7 @@ int main(int argc, char* argv[])
 
     int datalink = pcap_datalink(input_handle);
 
-    if (datalink != DLT_RAW &&
-        datalink != DLT_IPV4 &&
-        datalink != DLT_IPV6) {
+    if (datalink != DLT_RAW && datalink != DLT_IPV4 && datalink != DLT_IPV6) {
         fprintf(stderr, "The link-layer header type is not DLT_RAW/DLT_IPV4/DLT_IPV6.");
         pcap_close(input_handle);
         return 1;
@@ -49,12 +59,19 @@ int main(int argc, char* argv[])
     pcap_dumper_t* output_dumper = pcap_dump_open(output_dead_handle, output_filename);
 
     if (output_dumper == NULL) {
-        fprintf(stderr, "Failed to open file for writing %s: %s\n", output_filename,
-            pcap_geterr(output_dead_handle));
+        fprintf(stderr,
+                "Failed to open file for writing %s: %s\n",
+                output_filename,
+                pcap_geterr(output_dead_handle));
         pcap_close(input_handle);
         pcap_close(output_dead_handle);
         return 1;
     }
+
+    uint8_t dst_mac[6];
+    uint8_t src_mac[6];
+
+    gen_rand_mac_pair(dst_mac, src_mac);
 
     struct pcap_pkthdr* header = NULL;
     const uint8_t* packet_data = NULL;
@@ -64,7 +81,7 @@ int main(int argc, char* argv[])
         if (res == 0)
             continue;
 
-        uint8_t* new_packet = (uint8_t*)malloc(ETHERNET_HEADER_SIZE + header->caplen);
+        uint8_t* new_packet = (uint8_t*) malloc(ETHERNET_HEADER_SIZE + header->caplen);
 
         if (new_packet == NULL) {
             fprintf(stderr, "Memory allocation error.\n");
@@ -74,7 +91,7 @@ int main(int argc, char* argv[])
         uint16_t eth_type = 0;
 
         /* IP version */
-	/* With DLT_IPV4 we should have only ipv4 (and only ipv6 with DLT_IPV6)
+        /* With DLT_IPV4 we should have only ipv4 (and only ipv6 with DLT_IPV6)
 	 * but it should be harmless to check anyway */
         switch (packet_data[0] >> 4) {
         case 4:
@@ -89,7 +106,7 @@ int main(int argc, char* argv[])
             goto close;
         }
 
-        memcpy(new_packet, dest_mac, 6);
+        memcpy(new_packet, dst_mac, 6);
         memcpy(new_packet + 6, src_mac, 6);
         memcpy(new_packet + 12, &eth_type, 2);
 
@@ -99,7 +116,7 @@ int main(int argc, char* argv[])
         new_header.caplen += ETHERNET_HEADER_SIZE;
         new_header.len += ETHERNET_HEADER_SIZE;
 
-        pcap_dump((uint8_t*)output_dumper, &new_header, new_packet);
+        pcap_dump((uint8_t*) output_dumper, &new_header, new_packet);
 
         free(new_packet);
     }
