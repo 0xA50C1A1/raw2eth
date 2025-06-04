@@ -1,4 +1,5 @@
 #include <arpa/inet.h>
+#include <ctype.h>
 #include <netinet/if_ether.h>
 #include <netinet/ip.h>
 #include <netinet/ip6.h>
@@ -12,12 +13,47 @@
 void print_usage(const char* progname)
 {
     fprintf(stderr,
-            "Usage: %s [-h] -i input.pcap -o output.pcap\n"
+            "Usage: %s [-h] -i input.pcap -o output.pcap [-s src_mac] [-d dst_mac]\n"
             "Options:\n"
             "  -h\t\tShow this help message\n"
             "  -i FILE\tInput PCAP file (required)\n"
-            "  -o FILE\tOutput PCAP file (required)\n",
+            "  -o FILE\tOutput PCAP file (required)\n"
+            "  -s MAC\tSource MAC address (format: aa:bb:cc:dd:ee:ff)\n"
+            "  -d MAC\tDestination MAC address (format: 00:11:22:33:44:55)\n",
             progname);
+}
+
+int get_mac_from_string(const char* str, uint8_t mac[ETH_ALEN])
+{
+    if (!str)
+        return -1;
+
+    if (strnlen(str, 18) != 17)
+        return -1;
+
+    for (int i = 2; i < 17; i += 3) {
+        if (str[i] != ':')
+            return -1;
+    }
+
+    for (int i = 0; i < 17; i++) {
+        if (i % 3 == 2)
+            continue;
+
+        if (!isxdigit(str[i]))
+            return -1;
+    }
+
+    int result = sscanf(str,
+                        "%02hhx:%02hhx:%02hhx:%02hhx:%02hhx:%02hhx",
+                        &mac[0],
+                        &mac[1],
+                        &mac[2],
+                        &mac[3],
+                        &mac[4],
+                        &mac[5]);
+
+    return (result == ETH_ALEN) ? 0 : -1;
 }
 
 void gen_rand_mac_pair(uint8_t dst_mac[ETH_ALEN], uint8_t src_mac[ETH_ALEN])
@@ -38,9 +74,13 @@ int main(int argc, char* argv[])
 
     const char* input_filename = NULL;
     const char* output_filename = NULL;
+    int custom_macs = 0;
     int opt;
 
-    while ((opt = getopt(argc, argv, "hi:o:")) != -1) {
+    uint8_t dst_mac[ETH_ALEN] = {0};
+    uint8_t src_mac[ETH_ALEN] = {0};
+
+    while ((opt = getopt(argc, argv, "hi:o:d:s:")) != -1) {
         switch (opt) {
         case 'h':
             print_usage(argv[0]);
@@ -51,12 +91,35 @@ int main(int argc, char* argv[])
         case 'o':
             output_filename = optarg;
             break;
+        case 'd':
+            if (get_mac_from_string(optarg, dst_mac) != 0) {
+                fprintf(stderr, "Error: Invalid destination MAC format\n");
+                return 1;
+            }
+            custom_macs |= 1;
+            break;
+        case 's':
+            if (get_mac_from_string(optarg, src_mac) != 0) {
+                fprintf(stderr, "Error: Invalid source MAC format\n");
+                return 1;
+            }
+            custom_macs |= 2;
+            break;
         case '?':
             print_usage(argv[0]);
             return 1;
         default:
             abort();
         }
+    }
+
+    if (custom_macs && custom_macs != 3) {
+        fprintf(stderr, "Error: Both -d and -s must be specified\n");
+        return 1;
+    }
+
+    if (!custom_macs) {
+        gen_rand_mac_pair(dst_mac, src_mac);
     }
 
     if (!input_filename || !output_filename) {
@@ -111,11 +174,6 @@ int main(int argc, char* argv[])
         pcap_close(output_dead_handle);
         return 1;
     }
-
-    uint8_t dst_mac[ETH_ALEN];
-    uint8_t src_mac[ETH_ALEN];
-
-    gen_rand_mac_pair(dst_mac, src_mac);
 
     struct pcap_pkthdr* header = NULL;
     const uint8_t* packet_data = NULL;
