@@ -119,9 +119,26 @@ int main(int argc, char* argv[])
 
     struct pcap_pkthdr* header = NULL;
     const uint8_t* packet_data = NULL;
+    uint8_t* new_packet = NULL;
 
     size_t packet_count = 0;
     int res = 0;
+
+    int snaplen = pcap_snapshot(input_handle);
+    if (snaplen <= 0) {
+        fprintf(stderr, "Error: Invalid snaplen (%d)\n", snaplen);
+        goto close;
+    }
+
+    new_packet = malloc(snaplen + sizeof(struct ethhdr));
+
+    if (new_packet == NULL) {
+        fprintf(stderr,
+                "Error: Failed to allocate %zu bytes for packet #%zu\n",
+                (size_t) (sizeof(struct ethhdr) + header->caplen),
+                packet_count);
+        goto close;
+    }
 
     while ((res = pcap_next_ex(input_handle, &header, &packet_data)) >= 0) {
         if (res == 0)
@@ -139,15 +156,10 @@ int main(int argc, char* argv[])
 
         if (header->caplen > header->len) {
             fprintf(stderr,
-                    "Warning: Packet #%zu truncated (caplen %u > len %u)\n",
+                    "Error: Invalid packet #%zu (caplen %u > len %u)\n",
                     packet_count,
                     header->caplen,
                     header->len);
-            header->len = header->caplen;
-        }
-
-        if (header->caplen > UINT32_MAX - sizeof(struct ethhdr)) {
-            fprintf(stderr, "Error: Packet #%zu too large for Ethernet header\n", packet_count);
             continue;
         }
 
@@ -157,16 +169,6 @@ int main(int argc, char* argv[])
                     packet_count,
                     header->caplen);
             continue;
-        }
-
-        uint8_t* new_packet = (uint8_t*) malloc(sizeof(struct ethhdr) + header->caplen);
-
-        if (new_packet == NULL) {
-            fprintf(stderr,
-                    "Error: Failed to allocate %zu bytes for packet #%zu\n",
-                    (size_t) (sizeof(struct ethhdr) + header->caplen),
-                    packet_count);
-            goto close;
         }
 
         uint16_t eth_type = 0;
@@ -181,8 +183,6 @@ int main(int argc, char* argv[])
                         "Error: Packet #%zu too small for IPv4 header (%d bytes)\n",
                         packet_count,
                         header->caplen);
-                free(new_packet);
-                new_packet = NULL;
                 continue;
             }
             eth_type = htons(ETH_P_IP);
@@ -193,8 +193,6 @@ int main(int argc, char* argv[])
                         "Error: Packet #%zu too small for IPv6 header (%d bytes)\n",
                         packet_count,
                         header->caplen);
-                free(new_packet);
-                new_packet = NULL;
                 continue;
             }
             eth_type = htons(ETH_P_IPV6);
@@ -204,13 +202,11 @@ int main(int argc, char* argv[])
                     "Warning: Unknown IP version (%d) in packet #%zu, skipping\n",
                     packet_data[0] >> 4,
                     packet_count);
-            free(new_packet);
-            new_packet = NULL;
             continue;
         }
 
-        memcpy(new_packet, dst_mac, 6);
-        memcpy(new_packet + 6, src_mac, 6);
+        memcpy(new_packet, dst_mac, ETH_ALEN);
+        memcpy(new_packet + ETH_ALEN, src_mac, ETH_ALEN);
         memcpy(new_packet + 12, &eth_type, 2);
 
         memcpy(new_packet + sizeof(struct ethhdr), packet_data, header->caplen);
@@ -220,9 +216,6 @@ int main(int argc, char* argv[])
         new_header.len += sizeof(struct ethhdr);
 
         pcap_dump((uint8_t*) output_dumper, &new_header, new_packet);
-
-        free(new_packet);
-        new_packet = NULL;
     }
 
     if (res == -1) {
@@ -233,6 +226,9 @@ int main(int argc, char* argv[])
     }
 
 close:
+    if (new_packet)
+        free(new_packet);
+
     pcap_dump_close(output_dumper);
     pcap_close(output_dead_handle);
     pcap_close(input_handle);
