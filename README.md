@@ -10,7 +10,7 @@ Error while reading pcap file: 'an interface has a type 229 different from the t
 
 This happens because many network tools **expect all packets in a file to have the same link-layer type**. Mixed types (`DLT_EN10MB`, `DLT_IPV6`, etc.) break them.
 
-Yes, `tcprewrite --dlt=enet` exists. No, it doesn't work when you need it most (like with mixed traffic), so I wrote this. Sure, converting everything to `DLT_RAW` would be easier — but where’s the fun in that?
+Yes, `tcprewrite --dlt=enet` exists. No, it doesn't work when you need it most (like with mixed IPv4/IPv6 traffic), so I wrote this. Sure, converting everything to `DLT_RAW` would be easier — but where’s the fun in that?
 
 ### How?
 0. Install dependencies:
